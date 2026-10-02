@@ -1,0 +1,79 @@
+name: Build arm64
+
+on:
+  push:
+    branches: [ arm64 ]
+
+jobs:
+  build:
+    name: Cross-compile arm64 static
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake
+
+      - name: Write toolchain file
+        run: |
+          printf '%s\n' \
+            'set(CMAKE_SYSTEM_NAME Linux)' \
+            'set(CMAKE_SYSTEM_PROCESSOR aarch64)' \
+            'set(CMAKE_C_COMPILER aarch64-linux-gnu-gcc)' \
+            'set(CMAKE_CXX_COMPILER aarch64-linux-gnu-g++)' \
+            'set(SYSROOT_PREFIX ${CMAKE_CURRENT_LIST_DIR}/sys)' \
+            'set(CMAKE_FIND_ROOT_PATH /usr/aarch64-linux-gnu ${SYSROOT_PREFIX})' \
+            'set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)' \
+            'set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)' \
+            'set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)' \
+            'set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)' \
+            > arm64-toolchain.cmake
+          cat arm64-toolchain.cmake
+
+      - name: Build zlib (aarch64, static)
+        run: |
+          wget -q https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz
+          tar -xzf zlib-1.3.1.tar.gz
+          cmake -S zlib-1.3.1 -B zlib-build \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/arm64-toolchain.cmake \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/sys
+          cmake --build zlib-build -j$(nproc)
+          cmake --install zlib-build
+
+      - name: Build TagLib 2.1.1 (aarch64, static)
+        run: |
+          wget -q https://github.com/taglib/taglib/releases/download/v2.1.1/taglib-2.1.1.tar.gz
+          tar -xzf taglib-2.1.1.tar.gz
+          cmake -S taglib-2.1.1 -B taglib-build \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/arm64-toolchain.cmake \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/sys \
+            -DZLIB_ROOT=$GITHUB_WORKSPACE/sys \
+            -DBUILD_TESTING=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_BINDINGS=OFF
+          cmake --build taglib-build -j$(nproc)
+          cmake --install taglib-build
+
+      - name: Build ncmdump (aarch64)
+        run: |
+          cmake -B build \
+            -DCMAKE_TOOLCHAIN_FILE=$GITHUB_WORKSPACE/arm64-toolchain.cmake \
+            -DCMAKE_PREFIX_PATH=$GITHUB_WORKSPACE/sys \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          cmake --build build -j$(nproc)
+
+      - name: Verify binary
+        run: file build/ncmdump
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ncmdump-linux-arm64
+          path: build/ncmdump
